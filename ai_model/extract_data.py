@@ -3,14 +3,26 @@ from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
 from db.dbCtr import *
 
+import pandas as pd
+
+
 def extract_movie_data():
-    names = ['movie_id', "title", 'genres']
+    names = ['movie_id', 'title', 'genres']
     movies = pd.read_csv('../data/movies.dat',
                          names=names, sep='::', engine='python', encoding='latin-1')
-    # print(movies.head())
-    movies.genres = movies.genres.apply(lambda x:x.split('|'))
-    movies.genres = movies.genres.apply(lambda x:', '.join(x))
-    return movies
+
+    # 각 영화의 장르를 리스트로 변환
+    movies.genres = movies.genres.apply(lambda x: x.split('|'))
+
+    # 유니크한 장르를 모두 추출
+    unique_genres = set(genre for genres in movies.genres for genre in genres)
+
+    return movies, unique_genres
+
+
+movies, unique_genres = extract_movie_data()
+print("Unique genres:", unique_genres)
+
 
 def extract_user_data():
     names = ['user_id', "movie_id", 'rating', 'timestamp']
@@ -67,7 +79,9 @@ def insert_data_into_table(df, table):
 
 
 if __name__ == "__main__":
-    # customers = extract_user_data()
+    _, unique_genres = extract_movie_data()
+    print(unique_genres)
+    exit()
     # insert_data_into_table(customers, 'customers')
     ratings = extract_rating_data()
     insert_data_into_table(ratings, "ratings")
