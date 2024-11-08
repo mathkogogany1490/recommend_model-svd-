@@ -19,9 +19,9 @@ def extract_movie_data():
 
     return movies, unique_genres
 
-
-movies, unique_genres = extract_movie_data()
-print("Unique genres:", unique_genres)
+#
+# movies, unique_genres = extract_movie_data()
+# print("Unique genres:", unique_genres)
 
 
 def extract_user_data():

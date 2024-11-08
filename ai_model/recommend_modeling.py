@@ -3,14 +3,17 @@ import numpy as np
 from db.dbCtr import *
 from ai_model.extract_data import *
 import scipy
+import ast
 from tqdm import tqdm
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, lil_matrix
 from sklearn.decomposition import NMF
 from sklearn.metrics import mean_squared_error
 from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
 from sklearn.preprocessing import StandardScaler
 from surprise import SVD, Dataset as SurpriseDataset, Reader
+from implicit.als import AlternatingLeastSquares
+from collections import defaultdict
 
 # 평균 제곱 오차
 def MSE(origins, predicts):
@@ -219,8 +222,6 @@ def train_test_split():
     # print(train.shape)
     # print(test.shape)
     return train, test
-
-
 def mf_predict_model(degree=10, lr=0.005, epochs=50):
     # 데이터 분할 (train, test는 실제 데이터셋으로 대체)
     train, test = train_test_split()
@@ -245,8 +246,6 @@ def mf_predict_model(degree=10, lr=0.005, epochs=50):
     matrix = SVD(n_factors=degree, n_epochs=epochs, lr_all=lr, biased=False)
     matrix.fit(trainData)
     return matrix, train_data
-
-
 def save_predictions_to_mysql(model, train_data, table):
     fields = postgres_connect_field()
     # MySQL 연결 문자열 생성
@@ -285,12 +284,112 @@ def save_predictions_to_mysql(model, train_data, table):
     else:
         print("Data inserted and connection closed!!!")
 
+from tqdm import tqdm
+from scipy.sparse import lil_matrix
+from implicit.als import AlternatingLeastSquares
 
+from tqdm import tqdm
+from scipy.sparse import lil_matrix
+from implicit.als import AlternatingLeastSquares
+
+from tqdm import tqdm
+from scipy.sparse import lil_matrix
+from implicit.als import AlternatingLeastSquares
+
+from tqdm import tqdm
+from scipy.sparse import lil_matrix
+from implicit.als import AlternatingLeastSquares
+
+from tqdm import tqdm
+from scipy.sparse import lil_matrix
+from implicit.als import AlternatingLeastSquares
+
+def imf_predict_model(degree=10, epochs=50, alpha=1.0):
+    # 데이터 분할 (train, test는 실제 데이터셋으로 대체)
+    train, test = train_test_split()
+
+    # 사용자 및 영화 필터링
+    popular_users = train['user_id'].value_counts().index[:1000]
+    popular_movies = train['movie_id'].value_counts().index[:]
+
+
+    train_filtered = train[train['user_id'].isin(popular_users) &
+                           train['movie_id'].isin(popular_movies) &
+                           (train['rating'] >= 4.0)
+    ]
+    train_data = (train_filtered.groupby('movie_id')
+                  .filter(lambda x: len(x['movie_id']) > 100))
+
+    # 사용자와 영화의 수를 기반으로 희소 행렬 크기 설정
+    num_users = train_data['user_id'].nunique()
+    num_movies = train_data['movie_id'].nunique()
+
+
+    # 인덱스 매핑 생성
+    user_id2index = {user_id: idx for idx, user_id in enumerate(train_data['user_id'].unique())}
+    movie_id2index = {movie_id: idx for idx, movie_id in enumerate(train_data['movie_id'].unique())}
+
+
+    # 희소 행렬 생성
+    matrix = lil_matrix((num_users, num_movies))
+    for _, row in tqdm(train_data.iterrows()):
+        user_index = user_id2index[row["user_id"]]
+        movie_index = movie_id2index[row["movie_id"]]
+        matrix[user_index, movie_index] = 1.0 * alpha
+
+    # CSR 형식으로 변환
+    matrix_csr = matrix.tocsr()
+
+    # 모델 학습
+    model = AlternatingLeastSquares(factors=degree, iterations=epochs, calculate_training_loss=True, random_state=1)
+    model.fit(matrix_csr)  # CSR 형식을 사용하여 학습
+
+    # 사용자별 추천 생성
+    recommendations = model.recommend_all(matrix_csr)
+    df = pd.DataFrame(columns=["user_id", "movie_id", "rating"])
+    idx = 0
+    for (user_id, user_index), movie_idxs in tqdm(zip(user_id2index.items(), recommendations)):
+        for movie_idx in movie_idxs:
+            movie_id = [key for key, value in movie_id2index.items() if value == movie_idx][0]
+            rating = train_data[(train_data['user_id']==user_id) &
+                                (train_data['movie_id']== movie_id)]["rating"].values
+            # rating 값을 설정: 기존 값이 존재하지 않으면 가상의 평점 0 사용
+            rating_value = rating[0] if len(rating) > 0 else None
+            df.loc[idx] = [user_id, movie_id, rating_value]
+            idx += 1
+
+
+    return df
 
 
 if __name__ == "__main__":
-    matrix, train = mf_predict_model()
-    save_predictions_to_mysql(matrix, train, "mf_model")
+    df = imf_predict_model()
+    insert_data_into_table(df, 'imf_model')
+
+
+
+
+
+
+    # # Sample CSV path (assumed structure, adjust path as necessary)
+    # df = pd.read_csv("../data/imf_model3.csv")  # Adjusting the path to match your environment
+    #
+    # # 문자열로 저장된 리스트를 실제 리스트로 변환 후, PostgreSQL 형식의 배열 문자열로 변환
+    # df['recommended_movies'] = df['recommended_movies'].apply(
+    #     lambda x: '{' + ', '.join(map(str, ast.literal_eval(x))) + '}')
+    #
+    # # 수정된 내용을 새로운 CSV 파일로 저장
+    # df.to_csv("../data/imf_model.csv", index=False)
+    # Converting the 'recommended_movies' column from string representation to list
+    # df['recommended_movies'] = df['recommended_movies'].apply(ast.literal_eval)
+    # df.to_csv("../data/inf_model1.csv")
+    # Checking the type of the first element to confirm conversion
+    # data = df['recommended_movies'].to_list()
+    # data_type = type(data[0])
+    #
+    # print(data_type)
+    # matrix, train = mf_predict_model()
+    # save_predictions_to_mysql(matrix, train, "mf_model")
 
     # df = popularity_predict_model(200)
     # save_to_database(df, table_name="popular_movies")
